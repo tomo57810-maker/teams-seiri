@@ -36,7 +36,15 @@ function analyze(data) {
     const members = c.members.map((m) => ({ ...m, isMe: m.id === meId }));
     const others = members.filter((m) => !m.isMe);
     const otherIds = others.map((m) => m.id).sort();
-    const lastAt = (c.lastMessage && c.lastMessage.at) || c.updatedAt || c.createdAt || null;
+    const messages = c.messages || [];
+    const last = messages.length ? messages[messages.length - 1] : null;
+    const lastMessage = last ? { at: last.at, from: last.from, text: last.text } : c.lastMessage || null;
+    const lastAt = (lastMessage && lastMessage.at) || c.updatedAt || c.createdAt || null;
+    // 未読:自分以外の投稿で、最後に読んだ日時より新しいもの(取得済みの投稿の範囲で数える)。一度も読んでいなければ、すべて未読
+    const unread = messages.filter((m) => m.fromId !== meId && (!c.lastReadAt || m.at > c.lastReadAt)).length;
+    const files = messages
+      .flatMap((m) => m.attachments.map((a) => ({ name: a.name, url: a.url, at: m.at, from: m.from })))
+      .sort((a, b) => (b.at || '').localeCompare(a.at || ''));
     return {
       id: c.id,
       type: c.type,
@@ -44,7 +52,12 @@ function analyze(data) {
       displayName: displayNameOf(c, others),
       createdAt: c.createdAt || null,
       updatedAt: lastAt,
-      lastMessage: c.lastMessage || null,
+      lastMessage,
+      messages,
+      lastReadAt: c.lastReadAt || null,
+      unread,
+      unreadCapped: messages.length >= 20 && unread >= messages.length,
+      files,
       webUrl: c.webUrl || null,
       hidden: !!c.hidden,
       members,
@@ -141,6 +154,7 @@ function analyze(data) {
     meeting: chats.filter((c) => c.type === 'meeting').length,
     other: chats.filter((c) => !['group', 'oneOnOne', 'meeting'].includes(c.type)).length,
     hidden: chats.filter((c) => c.hidden).length,
+    unreadChats: chats.filter((c) => c.unread > 0).length,
     clusters: clusters.length,
     chatsInClusters: clusters.reduce((n, cl) => n + cl.chats.length, 0),
     identicalSets,

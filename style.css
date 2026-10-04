@@ -116,3 +116,20 @@ select { font: inherit; padding: 6px 10px; border: 1px solid var(--line); border
 .presults { display: flex; flex-direction: column; gap: 4px; }
 .presult { text-align: left; }
 button.danger { color: var(--red); border-color: var(--red); }
+
+/* ---- 未読・投稿・共有ファイル ---- */
+.ubadge { display: inline-block; min-width: 1.6em; padding: 0 7px; text-align: center; border-radius: 999px; background: #d92d20; color: #fff; font-size: 12px; font-weight: 700; line-height: 1.6; }
+.ubadge.small { min-width: 0; font-size: 11px; padding: 0 6px; }
+.ubadge.right { margin-left: auto; }
+.ubadge.right + .gtools { margin-left: 6px; }
+.msgs { display: flex; flex-direction: column; gap: 8px; margin: 6px 0; }
+.msg { border: 1px solid var(--line); border-radius: 10px; padding: 8px 12px; background: var(--bg); }
+.msg.mine { background: var(--main-soft); }
+.msg.new { border-color: #d92d20; }
+.mhead { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; font-size: 13px; }
+.mtext { white-space: pre-wrap; overflow-wrap: anywhere; margin-top: 2px; }
+.mfiles, .files { display: flex; flex-direction: column; gap: 2px; margin-top: 4px; }
+.mfiles a, .files a, .gfile a { color: var(--main); text-decoration: none; overflow-wrap: anywhere; }
+.gfiles { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 6px 12px; }
+.gfiles summary { cursor: pointer; font-size: 14px; color: var(--sub); }
+.gfile { margin: 4px 0; }

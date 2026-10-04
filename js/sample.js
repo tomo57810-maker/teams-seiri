@@ -16,6 +16,15 @@ function buildSample() {
   const M = (...keys) => ['me', ...keys].map(member);
   const t = (day, hour) => new Date(Date.UTC(2026, 9, day, hour - 9, 0, 0)).toISOString();
   const msg = (from, text, at) => ({ at, from: people[from], text, isSystem: false });
+  // 投稿(メッセージ)。files を渡すと、共有ファイルの添付つきになる
+  const post = (from, text, at, files = []) => ({
+    id: String(Date.parse(at)),
+    at,
+    fromId: from === 'me' ? 'u-me' : `u-${from}`,
+    from: people[from],
+    text,
+    attachments: files.map((name) => ({ name, url: `https://example.com/files/${encodeURIComponent(name)}` })),
+  });
 
   let n = 0;
   const chat = (type, keys, o = {}) => ({
@@ -28,15 +37,17 @@ function buildSample() {
     hidden: !!o.hidden,
     members: M(...keys),
     lastMessage: o.last || null,
+    lastReadAt: o.lastRead || null,
+    messages: o.msgs || [],
   });
 
   const chats = [
     // 似たチャット(1人違い):同じ工事の打合せ
-    chat('group', ['a', 'b', 'c'], { last: msg('a', '見積書を共有します(工事A_見積書.xlsx)', t(30, 16)), updatedAt: t(30, 16) }),
-    chat('group', ['a', 'b', 'c', 'd'], { last: msg('d', '図面の修正版を添付しました', t(28, 11)), updatedAt: t(28, 11) }),
+    chat('group', ['a', 'b', 'c'], { last: msg('a', '見積書を共有します(工事A_見積書.xlsx)', t(30, 16)), updatedAt: t(30, 16), lastRead: t(30, 16), msgs: [post('b', '来週の打合せの件、資料の準備をお願いします。', t(29, 10)), post('a', '見積書を共有します。', t(30, 16), ['工事A_見積書.xlsx']), post('b', '確認します。', t(30, 17))] }),
+    chat('group', ['a', 'b', 'c', 'd'], { last: msg('d', '図面の修正版を添付しました', t(28, 11)), updatedAt: t(28, 11), lastRead: t(28, 12), msgs: [post('d', '図面の修正版を添付しました。', t(28, 11), ['修正図面_第2版.pdf'])] }),
     chat('group', ['a', 'b', 'd'], { last: msg('b', '次回の打合せは来週です', t(20, 15)), updatedAt: t(20, 15) }),
     // 同じメンバーが2つ(別々に作られた)
-    chat('group', ['e', 'f', 'g'], { topic: '省エネ会議', last: msg('e', '資料はこちらです', t(29, 9)), updatedAt: t(29, 9) }),
+    chat('group', ['e', 'f', 'g'], { topic: '省エネ会議', last: msg('e', '資料はこちらです', t(29, 9)), updatedAt: t(29, 9), lastRead: t(29, 8), msgs: [post('e', '資料はこちらです。', t(29, 9), ['省エネ資料.pptx']), post('f', '了解です。', t(29, 10)), post('g', '拝見しました。', t(29, 11))] }),
     chat('group', ['e', 'f', 'g'], { last: msg('f', '日程調整お願いします', t(15, 13)), updatedAt: t(15, 13) }),
     // 似たチャット(2人違い)
     chat('group', ['b', 'c', 'e', 'f'], { last: msg('c', '点検の結果を報告します', t(25, 14)), updatedAt: t(25, 14) }),

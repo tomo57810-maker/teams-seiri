@@ -16,14 +16,16 @@ const st = {
   notes: {},
   groups: G.emptyDoc(),
   folder: { handle: null, granted: false },
-  tab: 'groups',
-  lens: 'similar',
+  view: 'groups', // 'groups' | 'all' | 'lens:<整理の仕方のid>'
+  editMode: false,
   q: '',
   type: 'all',
   dupOnly: false,
   selected: null,
   openGroups: [],
   openChat: null,
+  openFiles: [],
+  msgMore: new Set(), // 「もっと前の投稿」を開いているチャット
   editing: null,
   busy: false,
   syncMsg: '',
@@ -32,15 +34,16 @@ const st = {
 
 try {
   const p = JSON.parse(localStorage.getItem(PREF_KEY) || '{}');
-  if (['groups', 'all', 'view'].includes(p.tab)) st.tab = p.tab;
-  if (typeof p.lens === 'string') st.lens = p.lens;
+  if (typeof p.view === 'string') st.view = p.view;
+  else if (p.tab === 'all') st.view = 'all';
+  else if (p.tab === 'view' && typeof p.lens === 'string') st.view = `lens:${p.lens}`;
   if (Array.isArray(p.openGroups)) st.openGroups = p.openGroups.filter((x) => typeof x === 'string').slice(0, 500);
 } catch {
   /* 保存した表示設定が読めなければ、初期値のまま */
 }
 const savePrefs = () => {
   try {
-    localStorage.setItem(PREF_KEY, JSON.stringify({ tab: st.tab, lens: st.lens, openGroups: st.openGroups }));
+    localStorage.setItem(PREF_KEY, JSON.stringify({ view: st.view, openGroups: st.openGroups }));
   } catch {
     /* 保存できなくても動作には影響しない */
   }
@@ -234,7 +237,7 @@ function visibleChats(searchOnly = false) {
 const searchSet = () => (st.q.trim() ? new Set(visibleChats(true).map((c) => c.id)) : null);
 
 // ---- 描画:チャット1件の行と詳細 -------------------------------------------
-function chatRow(c, extra, onclick = () => select(c.id), opened = false) {
+function chatRow(c, extra, onclick = () => select(c.id), opened = false, compact = false) {
   const n = st.notes[c.id] || {};
   const names = c.members.filter((m) => !m.isMe).map((m) => m.name).join('、');
   return h(
@@ -245,16 +248,48 @@ function chatRow(c, extra, onclick = () => select(c.id), opened = false) {
       { class: 't' },
       h('span', { class: 'badge gray' }, typeLabel(c.type)),
       h('span', { class: 'name' }, c.displayName),
+      c.unread > 0 ? h('span', { class: 'ubadge', title: '未読の投稿' }, c.unreadCapped ? `${c.unread}+` : String(c.unread)) : null,
       h('span', { class: 'badge' }, `${c.members.length}人`),
-      c.identical.length ? h('span', { class: 'badge dup' }, `同じメンバー ${c.identical.length}件`) : null,
-      c.similar.length ? h('span', { class: 'badge warn' }, `似たチャット ${c.similar.length}件`) : null,
-      c.hidden ? h('span', { class: 'badge gray' }, '非表示') : null,
+      !compact && c.identical.length ? h('span', { class: 'badge dup' }, `同じメンバー ${c.identical.length}件`) : null,
+      !compact && c.similar.length ? h('span', { class: 'badge warn' }, `似たチャット ${c.similar.length}件`) : null,
+      !compact && c.hidden ? h('span', { class: 'badge gray' }, '非表示') : null,
       n.label ? h('span', { class: 'badge' }, `🏷 ${n.label}`) : null,
       h('span', { class: 'date' }, fmtDate(c.updatedAt))
     ),
     extra ? h('div', { class: 'extra' }, extra) : null,
-    h('div', { class: 'meta' }, c.topic ? `メンバー: ${names}` : n.memo || '')
+    h('div', { class: 'meta' }, c.lastMessage && c.lastMessage.text ? `${c.lastMessage.from ? `${c.lastMessage.from}: ` : ''}${c.lastMessage.text.replace(/\s+/g, ' ')}` : c.topic ? `メンバー: ${names}` : n.memo || '')
   );
+}
+
+// 最近の投稿(チャットの内容)
+function messagesBlock(c) {
+  const meId = st.data.me && st.data.me.id;
+  if (!c.messages.length) return [h('h4', {}, '最近の投稿'), h('div', { class: 'kv' }, '投稿はありません(または、まだ取得されていません)。')];
+  const showN = st.msgMore.has(c.id) ? c.messages.length : Math.min(8, c.messages.length);
+  const list = c.messages.slice(-showN);
+  return [
+    h('h4', {}, `最近の投稿(${list.length}/${c.messages.length}件)`),
+    h(
+      'div',
+      { class: 'msgs' },
+      list.map((m) => {
+        const isNew = m.fromId !== meId && (!c.lastReadAt || m.at > c.lastReadAt);
+        return h(
+          'div',
+          { class: `msg${m.fromId === meId ? ' mine' : ''}${isNew ? ' new' : ''}` },
+          h('div', { class: 'mhead' }, h('strong', {}, m.from || '(不明)'), h('span', { class: 'kv' }, fmtDate(m.at)), isNew ? h('span', { class: 'ubadge small' }, '新') : null),
+          h('div', { class: 'mtext' }, m.text || '(本文なし)'),
+          m.attachments.length ? h('div', { class: 'mfiles' }, m.attachments.map((a) => h('a', { href: a.url, target: '_blank', rel: 'noopener noreferrer' }, `📎 ${a.name}`))) : null
+        );
+      })
+    ),
+    c.messages.length > showN ? h('button', { onclick: (e) => (e.stopPropagation(), st.msgMore.add(c.id), renderList()) }, 'もっと前の投稿を表示') : null,
+  ];
+}
+
+function filesBlock(c) {
+  if (!c.files.length) return [];
+  return [h('h4', {}, `共有ファイル(${c.files.length}件)`), h('div', { class: 'files' }, c.files.map((f) => h('a', { href: f.url, target: '_blank', rel: 'noopener noreferrer' }, `📎 ${f.name}`, h('span', { class: 'kv' }, ` ${fmtDate(f.at)} ${f.from || ''}`))))];
 }
 
 // チャットの詳細(右の詳細欄と、グループの中での展開表示で共通)
@@ -276,6 +311,8 @@ function chatDetail(c, openOther = select) {
   return [
     h('div', { class: 'kv' }, `${typeLabel(c.type)} / ${c.members.length}人 / 最終更新 ${fmtDate(c.updatedAt) || '不明'} / 作成 ${fmtDate(c.createdAt) || '不明'}`),
     c.webUrl && c.webUrl.startsWith('https://') ? h('p', {}, h('a', { class: 'btn primary', href: c.webUrl, target: '_blank', rel: 'noopener' }, 'Teams で開く')) : null,
+    messagesBlock(c),
+    filesBlock(c),
     h('h4', {}, 'メンバー'),
     h('div', { class: 'members' }, c.members.map((m) => h('span', { class: `member${m.isMe ? ' me' : ''}`, title: m.email || '' }, m.isMe ? `${m.name}(自分)` : m.name))),
     assignmentPanel(c, app),
@@ -306,11 +343,11 @@ function renderList() {
   const box = document.getElementById('list');
   if (!box) return;
   box.replaceChildren();
-  if (st.tab === 'groups') {
+  if (st.view === 'groups') {
     box.append(groupsTab(app));
     return;
   }
-  if (st.tab === 'all') {
+  if (st.view === 'all') {
     const list = visibleChats();
     if (!list.length) box.append(h('p', { class: 'kv' }, '該当するチャットはありません。'));
     list.forEach((c) => box.append(chatRow(c)));
@@ -318,7 +355,7 @@ function renderList() {
   }
   const byId = new Map(st.data.chats.map((c) => [c.id, c]));
   const matched = new Set(visibleChats(true).map((c) => c.id));
-  const { groups, emptyText } = lensById(st.lens).run(st.data, { notes: st.notes });
+  const { groups, emptyText } = lensById(st.view.replace(/^lens:/, '')).run(st.data, { notes: st.notes });
   let shown = 0;
   for (const g of groups) {
     const ids = g.chatIds.filter((id) => !st.q.trim() || matched.has(id));
@@ -337,7 +374,7 @@ function select(id) {
 
 function renderDetail() {
   const box = document.getElementById('detail');
-  const c = st.data && st.tab !== 'groups' && st.data.chats.find((x) => x.id === st.selected);
+  const c = st.data && st.view !== 'groups' && st.data.chats.find((x) => x.id === st.selected);
   if (!c) {
     box.hidden = true;
     return;
@@ -386,36 +423,38 @@ function renderSettings(main) {
   );
 }
 
-function renderCards(main) {
-  const c = st.data.counts;
-  const card = (num, lbl, hl) => h('div', { class: `card${hl ? ' hl' : ''}` }, h('div', { class: 'num' }, String(num)), h('div', { class: 'lbl' }, lbl));
-  main.append(h('div', { class: 'cards' }, card(c.total, 'チャットの合計'), card(c.group, 'グループチャット'), card(c.oneOnOne, '1対1'), card(c.meeting, '会議チャット'), card(c.clusters, `似たチャットのまとまり(${c.chatsInClusters}件)`, c.clusters > 0), card(c.identicalSets, '同じメンバーが複数ある組', c.identicalSets > 0)));
-}
+const VIEWS = () => [
+  { id: 'groups', name: 'グループ' },
+  { id: 'all', name: 'すべてのチャット' },
+  ...lenses.map((l) => ({ id: `lens:${l.id}`, name: l.name })),
+];
 
 function renderTools(main) {
   const chip = (label, on, fn) => h('button', { class: `chip${on ? ' on' : ''}`, onclick: fn }, label);
-  const search = h('input', { type: 'search', placeholder: '検索(名前・メンバー・メモ。空白で複数条件)', value: st.q });
+  const search = h('input', { type: 'search', placeholder: '検索(名前・メンバー・メモ)', value: st.q });
   search.addEventListener('input', () => {
     st.q = search.value;
     renderList();
   });
-  const tab = (id, label) => h('button', { class: `tab${st.tab === id ? ' on' : ''}`, onclick: () => ((st.tab = id), (st.editing = null), savePrefs(), render()) }, label);
-  main.append(h('div', { class: 'tabs' }, tab('groups', 'グループ'), tab('all', `すべて(${st.data.counts.total})`), tab('view', '整理して見る')));
-  const tools = h('div', { class: 'tools' }, search);
-  if (st.tab === 'all') {
-    tools.append(h('div', { class: 'chips' }, chip('すべて', st.type === 'all', () => ((st.type = 'all'), render())), chip('グループ', st.type === 'group', () => ((st.type = 'group'), render())), chip('1対1', st.type === 'oneOnOne', () => ((st.type = 'oneOnOne'), render())), chip('会議', st.type === 'meeting', () => ((st.type = 'meeting'), render())), chip('似ている・同じメンバーのみ', st.dupOnly, () => ((st.dupOnly = !st.dupOnly), render()))));
-  } else if (st.tab === 'view') {
-    const sel = h('select', { 'aria-label': '整理の仕方' }, lenses.map((l) => h('option', { value: l.id }, l.name)));
-    sel.value = lensById(st.lens).id;
-    sel.addEventListener('change', () => {
-      st.lens = sel.value;
-      savePrefs();
-      render();
-    });
-    tools.append(h('label', { class: 'lens' }, '整理の仕方:', sel));
-  }
+  const views = VIEWS();
+  if (!views.some((v) => v.id === st.view)) st.view = 'groups';
+  const sel = h('select', { 'aria-label': '表示' }, views.map((v) => h('option', { value: v.id }, v.name)));
+  sel.value = st.view;
+  sel.addEventListener('change', () => {
+    st.view = sel.value;
+    st.editing = null;
+    st.editMode = false;
+    savePrefs();
+    render();
+  });
+  const tools = h('div', { class: 'tools' }, search, sel);
+  if (st.view === 'groups') tools.append(h('button', { class: st.editMode ? 'primary' : '', onclick: () => ((st.editMode = !st.editMode), (st.editing = null), render()) }, st.editMode ? '編集を終わる' : 'グループを編集'));
   main.append(tools);
-  if (st.tab === 'view') main.append(h('p', { class: 'kv' }, lensById(st.lens).description));
+  if (st.view === 'all') {
+    main.append(h('div', { class: 'chips' }, chip('すべて', st.type === 'all', () => ((st.type = 'all'), render())), chip('グループ', st.type === 'group', () => ((st.type = 'group'), render())), chip('1対1', st.type === 'oneOnOne', () => ((st.type = 'oneOnOne'), render())), chip('会議', st.type === 'meeting', () => ((st.type = 'meeting'), render())), chip('似ている・同じメンバーのみ', st.dupOnly, () => ((st.dupOnly = !st.dupOnly), render()))));
+  } else if (st.view.startsWith('lens:')) {
+    main.append(h('p', { class: 'kv' }, lensById(st.view.slice(5)).description));
+  }
 }
 
 function renderHeader() {
@@ -423,6 +462,7 @@ function renderHeader() {
   const actions = document.getElementById('actions');
   const parts = [];
   if (st.raw) parts.push(`${st.raw.source === 'sample' ? '【デモデータ】' : ''}取得: ${fmtDate(st.raw.fetchedAt)}`);
+  if (st.data && st.data.counts.unreadChats) parts.push(`未読のあるチャット ${st.data.counts.unreadChats}件`);
   if (st.syncMsg) parts.push(st.syncMsg);
   status.textContent = parts.join(' / ');
   actions.replaceChildren();
@@ -449,10 +489,9 @@ function render() {
     renderDetail();
     return;
   }
-  renderCards(main);
   renderTools(main);
   main.append(h('div', { class: 'list', id: 'list' }));
-  main.append(h('p', { class: 'note' }, '「似たチャット」は、グループチャットのうち、メンバーの違いが2人以内で、自分以外の共通メンバーが2人以上いるものです。1対1と会議は対象外です。'));
+  if (st.view !== 'groups' && st.view !== 'all') main.append(h('p', { class: 'note' }, '「似たチャット」は、グループチャットのうち、メンバーの違いが2人以内で、自分以外の共通メンバーが2人以上いるものです。1対1と会議は対象外です。'));
   renderList();
   renderDetail();
 }
@@ -488,4 +527,5 @@ async function autoRefresh() {
   render();
   await autoRefresh();
   document.addEventListener('visibilitychange', () => document.visibilityState === 'visible' && autoRefresh());
+  setInterval(() => document.visibilityState === 'visible' && autoRefresh(), 60 * 1000);
 })();

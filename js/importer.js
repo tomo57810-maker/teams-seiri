@@ -3,6 +3,15 @@
 
 const str = (v, max = 500) => (typeof v === 'string' ? v.slice(0, max) : null);
 
+function parseMessage(m) {
+  if (!m || typeof m.at !== 'string') return null;
+  const attachments = (Array.isArray(m.attachments) ? m.attachments : [])
+    .slice(0, 20)
+    .filter((a) => a && typeof a.url === 'string' && a.url.startsWith('https://') && a.url.length <= 2000) // https のリンクだけを通す
+    .map((a) => ({ name: str(a.name, 200) || '(名前なし)', url: a.url }));
+  return { id: str(m.id, 100), at: m.at.slice(0, 40), fromId: str(m.fromId, 100), from: str(m.from, 200), text: str(m.text, 2000) || '', attachments };
+}
+
 export function parseImport(text) {
   let raw;
   try {
@@ -23,6 +32,9 @@ export function parseImport(text) {
       updatedAt: str(c.updatedAt, 40),
       webUrl: str(c.webUrl, 2000),
       hidden: !!c.hidden,
+      lastReadAt: str(c.lastReadAt, 40),
+      lastMessageId: str(c.lastMessageId, 100),
+      messages: (Array.isArray(c.messages) ? c.messages : []).slice(-50).map(parseMessage).filter(Boolean),
       lastMessage: null,
       members: c.members.filter((m) => m && typeof m.id === 'string').map((m) => ({ id: m.id, name: str(m.name, 200) || '(名前なし)', email: str(m.email, 200) })),
     };

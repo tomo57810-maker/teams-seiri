@@ -1,6 +1,6 @@
 // 「グループ」タブの画面。階層のグループを開閉しながら、その場でチャットを見られる。
 // app = { st, save(), rerenderList(), chatRow(chat, extra, onclick, opened), chatDetail(chat), searchSet() }
-import { h, toast } from './util.js';
+import { h, toast, fmtDate } from './util.js';
 import * as G from './groups.js';
 
 const TYPE_OPTIONS = [
@@ -31,14 +31,16 @@ export function peopleIndex(data) {
 export function groupsTab(app) {
   const { st } = app;
   const wrap = h('div', { class: 'groups' });
-  wrap.append(
-    h(
-      'div',
-      { class: 'gbar' },
-      h('button', { class: 'primary', onclick: () => openEditor(app, null, null) }, '＋ グループを追加'),
-      h('span', { class: 'kv' }, 'グループの中のグループも作れます(各グループの「＋」)。')
-    )
-  );
+  if (st.editMode) {
+    wrap.append(
+      h(
+        'div',
+        { class: 'gbar' },
+        h('button', { class: 'primary', onclick: () => openEditor(app, null, null) }, '＋ グループを追加'),
+        h('span', { class: 'kv' }, 'グループの中のグループは、各グループの「＋」で作れます。')
+      )
+    );
+  }
   if (st.editing) wrap.append(editorPanel(app));
 
   const tree = G.buildTree(st.data, st.groups);
@@ -46,7 +48,7 @@ export function groupsTab(app) {
   const byId = new Map(st.data.chats.map((c) => [c.id, c]));
 
   if (!st.groups.nodes.length) {
-    wrap.append(h('div', { class: 'empty' }, h('h2', {}, 'グループを作りましょう'), h('p', {}, '例:「施設課」を作り、その中に「課長と自分」「課長と補佐のみ」を作ります。条件(人)を指定すると、チャットが自動で入ります。')));
+    wrap.append(h('div', { class: 'empty' }, h('h2', {}, 'グループを作りましょう'), h('p', {}, '例:「施設課」を作り、その中に「課長と自分」「課長と補佐のみ」を作ります。条件(人)を指定すると、チャットが自動で入ります。'), h('div', { class: 'btns' }, h('button', { class: 'primary', onclick: () => ((st.editMode = true), openEditor(app, null, null)) }, '最初のグループを作る'))));
   }
   let shown = 0;
   for (const v of tree.roots) {
@@ -64,13 +66,45 @@ export function groupsTab(app) {
       h(
         'div',
         { class: 'gnode' },
-        h('div', { class: 'ghead muted', onclick: () => toggle(app, 'unclassified') }, h('span', { class: 'caret' }, open ? '▼' : '▶'), h('span', { class: 'gname' }, '未分類'), h('span', { class: 'badge gray' }, `${rest.length}件`)),
+        h('div', { class: 'ghead muted', onclick: () => toggle(app, 'unclassified') }, h('span', { class: 'caret' }, open ? '▼' : '▶'), h('span', { class: 'gname' }, '未分類'), h('span', { class: 'badge gray' }, `${rest.length}件`), unreadChatsIn(rest, byId) ? h('span', { class: 'ubadge right', title: '未読のあるチャットの数' }, String(unreadChatsIn(rest, byId))) : null),
         open ? h('div', { class: 'gbody' }, rest.length ? rest.map((id) => chatWrap(byId.get(id), app)) : h('p', { class: 'kv' }, 'すべてのチャットがグループに入っています。')) : null
       )
     );
   }
   if (searchSet && !shown && !rest.length) wrap.append(h('p', { class: 'kv' }, '該当するチャットはありません。'));
   return wrap;
+}
+
+// このグループ(と、その下の階層)で、未読の投稿があるチャットの数
+function unreadChatsIn(ids, byId) {
+  let n = 0;
+  for (const id of ids) if (byId.get(id) && byId.get(id).unread > 0) n++;
+  return n;
+}
+
+// グループの中で共有されたファイルの一覧(新しい順)
+function filesSection(v, app, byId) {
+  const { st } = app;
+  const files = [...v.subtree]
+    .flatMap((id) => (byId.get(id).files || []).map((f) => ({ ...f, chat: byId.get(id).displayName })))
+    .sort((a, b) => (b.at || '').localeCompare(a.at || ''))
+    .slice(0, 50);
+  if (!files.length) return null;
+  const opened = st.openFiles.includes(v.node.id);
+  return h(
+    'details',
+    {
+      class: 'gfiles',
+      open: opened ? '' : false,
+      ontoggle: (e) => {
+        const i = st.openFiles.indexOf(v.node.id);
+        if (e.target.open && i < 0) st.openFiles.push(v.node.id);
+        if (!e.target.open && i >= 0) st.openFiles.splice(i, 1);
+      },
+    },
+    h('summary', {}, `共有ファイル(${files.length}件)`),
+    files.map((f) => h('div', { class: 'gfile' }, h('a', { href: f.url, target: '_blank', rel: 'noopener noreferrer' }, `📎 ${f.name}`), h('span', { class: 'kv' }, ` ${f.chat} / ${fmtDate(f.at)}`)))
+  );
 }
 
 function toggle(app, id) {
@@ -91,7 +125,7 @@ function chatWrap(c, app) {
     app.chatRow(c, null, () => {
       st.openChat = opened ? null : c.id;
       app.rerenderList();
-    }, opened),
+    }, opened, true),
     opened ? h('div', { class: 'inline' }, app.chatDetail(c)) : null
   );
 }
@@ -125,7 +159,9 @@ function nodeEl(v, app, byId, searchSet) {
       h('span', { class: 'caret' }, open ? '▼' : '▶'),
       h('span', { class: 'gname' }, v.node.name),
       h('span', { class: 'badge' }, `${searchSet ? hits : v.total}件`),
-      h(
+      unreadChatsIn(v.subtree, byId) ? h('span', { class: 'ubadge right', title: '未読のあるチャットの数' }, String(unreadChatsIn(v.subtree, byId))) : null,
+      st.editMode &&
+        h(
         'span',
         { class: 'gtools' },
         mini('↑', '上へ', () => (G.moveSibling(st.groups, v.node.id, -1), app.save())),
@@ -138,6 +174,7 @@ function nodeEl(v, app, byId, searchSet) {
       ? h(
           'div',
           { class: 'gbody' },
+          filesSection(v, app, byId),
           children,
           own.map((id) => chatWrap(byId.get(id), app)),
           !children.length && !own.length ? h('p', { class: 'kv' }, 'チャットはありません。「編集」で条件を足すか、チャットの詳細から手動で入れられます。') : null
