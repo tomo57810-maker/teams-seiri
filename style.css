@@ -133,3 +133,18 @@ button.danger { color: var(--red); border-color: var(--red); }
 .gfiles { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 6px 12px; }
 .gfiles summary { cursor: pointer; font-size: 14px; color: var(--sub); }
 .gfile { margin: 4px 0; }
+
+/* ---- 投稿の記録 ---- */
+.post { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 10px 14px; margin-top: 8px; }
+.phead { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; font-size: 14px; }
+.pdate { color: var(--sub); }
+.ptext { white-space: pre-wrap; overflow-wrap: anywhere; margin-top: 4px; display: -webkit-box; -webkit-line-clamp: 6; -webkit-box-orient: vertical; overflow: hidden; }
+.pbtns { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
+.grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+@media (max-width: 600px) { .grid2 { grid-template-columns: 1fr; } }
+.geditor textarea { width: 100%; font: inherit; padding: 8px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); color: var(--text); min-height: 90px; resize: vertical; }
+.geditor input[type=datetime-local] { width: 100%; }
+.ffiles { display: flex; flex-direction: column; gap: 6px; }
+.frow { display: grid; grid-template-columns: 1fr 1.6fr auto; gap: 6px; align-items: center; }
+@media (max-width: 600px) { .frow { grid-template-columns: 1fr; } }
+.posts .cluster h3 { margin: 0 0 4px; }

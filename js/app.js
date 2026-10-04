@@ -1,11 +1,14 @@
 import { analyze } from './analyze.js';
-import { buildSample, sampleGroups } from './sample.js';
+import { buildSample, sampleGroups, samplePosts } from './sample.js';
 import { lenses, lensById } from './lenses.js';
 import { dbGet, dbSet, dbDelete } from './db.js';
 import { parseImport } from './importer.js';
 import * as G from './groups.js';
 import * as sync from './sync.js';
 import { groupsTab, assignmentPanel } from './groups-ui.js';
+import * as P from './posts.js';
+import { postsTab } from './posts-ui.js';
+import { buildXlsx } from './xlsx.js';
 import { h, toast, fmtDate, typeLabel } from './util.js';
 
 const PREF_KEY = 'teams-seiri:prefs';
@@ -15,6 +18,8 @@ const st = {
   data: null,
   notes: {},
   groups: G.emptyDoc(),
+  posts: P.emptyPosts(),
+  postForm: null,
   folder: { handle: null, granted: false },
   view: 'groups', // 'groups' | 'all' | 'lens:<整理の仕方のid>'
   editMode: false,
@@ -74,9 +79,9 @@ async function applyChats(raw) {
   setRaw(raw);
 }
 
-// グループ設定を保存する(この端末に保存し、PCでフォルダに接続していれば、OneDriveのファイルにも書く)
-async function persistGroups() {
-  await dbSet('groups', st.groups);
+// 設定や記録を保存する(この端末に保存し、PCでフォルダに接続していれば、OneDriveのファイルにも書く)
+async function persistDoc(key, file, doc) {
+  await dbSet(key, doc);
   const f = st.folder;
   if (!f.handle) {
     st.syncMsg = '';
@@ -87,13 +92,15 @@ async function persistGroups() {
     return;
   }
   try {
-    await sync.writeText(f.handle, sync.GROUPS_FILE, JSON.stringify(st.groups, null, 2));
-    st.syncMsg = `フォルダに保存済み ${fmtDate(st.groups.updatedAt)}`;
+    await sync.writeText(f.handle, file, JSON.stringify(doc, null, 2));
+    st.syncMsg = `フォルダに保存済み ${fmtDate(doc.updatedAt)}`;
   } catch (e) {
     st.syncMsg = 'フォルダへの保存に失敗しました';
     toast(`フォルダへの保存に失敗しました。\n${e.message}`, true);
   }
 }
+const persistGroups = () => persistDoc('groups', sync.GROUPS_FILE, st.groups);
+const persistPosts = () => persistDoc('posts', sync.POSTS_FILE, st.posts);
 
 async function saveGroups() {
   G.touch(st.groups);
@@ -103,7 +110,14 @@ async function saveGroups() {
   renderDetail();
 }
 
-// PCのフォルダから、最新の chats.json と groups.json を読み込む(interactive=true のときだけ、許可を求める)
+async function savePosts() {
+  P.touchPosts(st.posts);
+  await persistPosts();
+  renderHeader();
+  renderList();
+}
+
+// PCのフォルダから、最新の chats.json・groups.json・posts.json を読み込む(interactive=true のときだけ、許可を求める)
 async function loadFromFolder(interactive) {
   const f = st.folder;
   if (!f.handle) return false;
@@ -133,6 +147,21 @@ async function loadFromFolder(interactive) {
   } else if (st.groups.nodes.length) {
     await persistGroups();
   }
+  const postsText = await sync.readText(f.handle, sync.POSTS_FILE);
+  if (postsText) {
+    const remote = P.parsePostsFile(postsText);
+    const remoteAt = remote.updatedAt || '';
+    const localAt = st.posts.updatedAt || '';
+    if (remoteAt > localAt) {
+      st.posts = remote;
+      await dbSet('posts', remote);
+      message ||= '投稿の記録を読み込みました。';
+    } else if (localAt > remoteAt) {
+      await persistPosts();
+    }
+  } else if (st.posts.items.length) {
+    await persistPosts();
+  }
   st.syncMsg = `フォルダと同期済み ${fmtDate(new Date().toISOString())}`;
   return message || true;
 }
@@ -159,7 +188,7 @@ const doSyncFolder = () =>
     toast(typeof r === 'string' ? r : '最新の状態です。');
   });
 
-// スマホ用:ファイルを選んで読み込む(chats.json と groups.json を、同時に選んでもよい)
+// スマホ用:ファイルを選んで読み込む(chats.json・groups.json・posts.json を、同時に選んでもよい)
 function pickFiles() {
   const input = h('input', { type: 'file', accept: '.json,application/json', multiple: 'multiple' });
   input.addEventListener('change', () => {
@@ -186,8 +215,14 @@ function pickFiles() {
           st.groups = doc;
           await dbSet('groups', doc);
           done.push(`グループ${doc.nodes.length}個`);
+        } else if (obj && Array.isArray(obj.items)) {
+          const doc = P.parsePostsFile(text);
+          if (st.posts.items.length && (st.posts.updatedAt || '') > (doc.updatedAt || '') && !confirm('この端末の投稿の記録の方が新しいようです。読み込んだ記録で置き換えますか?')) continue;
+          st.posts = doc;
+          await dbSet('posts', doc);
+          done.push(`投稿の記録${doc.items.length}件`);
         } else {
-          throw new Error(`${file.name} は、チャット一覧でもグループ設定でもありません。`);
+          throw new Error(`${file.name} は、チャット一覧・グループ設定・投稿の記録のどれでもありません。`);
         }
       }
       if (done.length) toast(`${done.join('、')}を読み込みました。`);
@@ -197,6 +232,15 @@ function pickFiles() {
 }
 
 const exportGroups = () => sync.downloadText('groups.json', JSON.stringify(st.groups, null, 2));
+const exportPosts = () => sync.downloadText('posts.json', JSON.stringify(st.posts, null, 2));
+
+// 投稿の記録を、最上位のグループごとのシートに整理して、Excelに書き出す
+const exportExcel = () => {
+  const bytes = buildXlsx(P.toExcelSheets(P.organize(st.posts, st.data, st.groups)));
+  const day = new Date(Date.now() + 9 * 3600e3).toISOString().slice(0, 10).replace(/-/g, '');
+  sync.downloadBytes(`Teams投稿の記録_${day}.xlsx`, bytes, 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+  toast('Excelを書き出しました。ダウンロードのフォルダを確認してください。');
+};
 
 const doDemo = () =>
   run(async () => {
@@ -204,6 +248,10 @@ const doDemo = () =>
     if (!st.groups.nodes.length) {
       st.groups = sampleGroups();
       await dbSet('groups', st.groups);
+    }
+    if (!st.posts.items.length) {
+      st.posts = samplePosts();
+      await dbSet('posts', st.posts);
     }
   });
 
@@ -215,6 +263,10 @@ const doClear = () =>
     setRaw(null);
     st.selected = null;
     st.openChat = null;
+    if (st.posts.items.length && st.posts.items.every((p) => p.id.startsWith('p-demo'))) {
+      st.posts = P.emptyPosts();
+      await dbDelete('posts');
+    }
     if (isDemoGroups()) {
       st.groups = G.emptyDoc();
       await dbDelete('groups');
@@ -338,7 +390,7 @@ function chatDetail(c, openOther = select) {
   ];
 }
 
-const app = { st, save: saveGroups, savePrefs, rerenderList: () => renderList(), chatRow, chatDetail: (c) => chatDetail(c, (id) => ((st.openChat = id), renderList())), searchSet };
+const app = { st, save: saveGroups, savePosts, exportExcel, savePrefs, rerenderList: () => renderList(), chatRow, chatDetail: (c) => chatDetail(c, (id) => ((st.openChat = id), renderList())), searchSet };
 
 function renderList() {
   const box = document.getElementById('list');
@@ -346,6 +398,10 @@ function renderList() {
   box.replaceChildren();
   if (st.view === 'groups') {
     box.append(groupsTab(app));
+    return;
+  }
+  if (st.view === 'posts') {
+    box.append(postsTab(app));
     return;
   }
   if (st.view === 'all') {
@@ -416,9 +472,9 @@ function renderSettings(main) {
         : h('p', { class: 'kv' }, 'この端末のブラウザは、フォルダとの直接連携に対応していません。ファイルを選んで読み込みます。'),
       h('h4', {}, 'ファイルで受け渡す(スマホ・フォルダ連携なしの場合)'),
       h('p', { class: 'kv' }, 'chats.json と groups.json は、同時に選べます。スマホで編集したグループ設定をPCへ戻すには、「グループ設定を書き出す」で groups.json を保存し、OneDriveの「Teams整理」フォルダにアップロードしてください(同名のファイルを上書き)。'),
-      h('div', { class: 'btns left' }, h('button', { class: 'primary', onclick: pickFiles }, 'ファイルを読み込む'), h('button', { onclick: exportGroups }, 'グループ設定を書き出す')),
+      h('div', { class: 'btns left' }, h('button', { class: 'primary', onclick: pickFiles }, 'ファイルを読み込む'), h('button', { onclick: exportGroups }, 'グループ設定を書き出す'), h('button', { onclick: exportPosts }, '投稿の記録を書き出す')),
       h('h4', {}, '消す'),
-      h('div', { class: 'btns left' }, h('button', { onclick: () => (doClear(), (st.page = 'main')) }, '読み込んだチャットを消す'), h('button', { class: 'danger', onclick: () => confirm('グループ設定をすべて削除しますか?(フォルダ接続中は、フォルダのファイルも次回の保存で置き換わります)') && run(async () => ((st.groups = G.touch(G.emptyDoc())), await persistGroups())) }, 'グループ設定を消す')),
+      h('div', { class: 'btns left' }, h('button', { onclick: () => (doClear(), (st.page = 'main')) }, '読み込んだチャットを消す'), h('button', { class: 'danger', onclick: () => confirm('グループ設定をすべて削除しますか?(フォルダ接続中は、フォルダのファイルも次回の保存で置き換わります)') && run(async () => ((st.groups = G.touch(G.emptyDoc())), await persistGroups())) }, 'グループ設定を消す'), h('button', { class: 'danger', onclick: () => confirm('投稿の記録をすべて削除しますか?(フォルダ接続中は、フォルダのファイルも次回の保存で置き換わります)') && run(async () => ((st.posts = P.touchPosts(P.emptyPosts())), await persistPosts())) }, '投稿の記録を消す')),
       h('div', { class: 'btns left' }, h('button', { onclick: () => ((st.page = 'main'), render()) }, '戻る'))
     )
   );
@@ -426,6 +482,7 @@ function renderSettings(main) {
 
 const VIEWS = () => [
   { id: 'groups', name: 'グループ' },
+  { id: 'posts', name: '投稿の記録' },
   { id: 'all', name: 'すべてのチャット' },
   ...lenses.map((l) => ({ id: `lens:${l.id}`, name: l.name })),
 ];
@@ -518,6 +575,8 @@ async function autoRefresh() {
     st.notes = await dbGet('notes', {});
     const saved = await dbGet('groups', null);
     if (saved) st.groups = G.sanitizeDoc(saved);
+    const savedPosts = await dbGet('posts', null);
+    if (savedPosts) st.posts = P.sanitizePosts(savedPosts);
     if (sync.folderSupported) {
       const handle = await sync.savedFolder();
       if (handle) st.folder = { handle, granted: await sync.hasPermission(handle) };

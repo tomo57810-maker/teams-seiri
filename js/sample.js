@@ -84,4 +84,19 @@ function sampleGroups() {
   };
 }
 
-export { buildSample, sampleGroups };
+// デモ用の投稿の記録(架空)。デモのチャットに結びついている
+function samplePosts() {
+  const link = (chat, ms) => `https://teams.microsoft.com/l/message/${encodeURIComponent(chat)}/${ms}?tenantId=demo`;
+  const item = (id, chatId, ms, from, text, extra = {}) => ({ id, at: new Date(ms).toISOString(), from, text, status: '', note: '', link: link(chatId, ms), chatId, groupId: null, files: [], ...extra });
+  return {
+    version: 1,
+    updatedAt: new Date().toISOString(),
+    items: [
+      item('p-demo-1', '19:demo1@thread.v2', Date.UTC(2026, 9, 30, 7, 0), '青木 一郎', '見積書を共有します。', { status: '確認中', files: [{ name: '工事A_見積書.xlsx', url: 'https://example.com/files/estimate.xlsx' }] }),
+      item('p-demo-2', '19:demo2@thread.v2', Date.UTC(2026, 9, 28, 2, 0), '遠藤 美咲', '図面の修正版を添付しました。', { files: [{ name: '修正図面_第2版.pdf', url: 'https://example.com/files/drawing.pdf' }] }),
+      item('p-demo-3', '19:demo4@thread.v2', Date.UTC(2026, 9, 29, 0, 0), '岡田 健', '省エネ会議の資料です。', { status: '参考', note: '次回会議で使用' }),
+    ],
+  };
+}
+
+export { buildSample, sampleGroups, samplePosts };

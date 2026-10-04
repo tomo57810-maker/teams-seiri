@@ -8,6 +8,7 @@ export const folderSupported = typeof window !== 'undefined' && 'showDirectoryPi
 const KEY = 'dirHandle';
 export const CHATS_FILE = 'chats.json';
 export const GROUPS_FILE = 'groups.json';
+export const POSTS_FILE = 'posts.json';
 
 // フォルダを選んでもらう(ボタンを押した直後に呼ぶ必要がある)
 export async function connectFolder() {
@@ -56,6 +57,18 @@ export async function writeText(handle, name, text) {
 // スマホ用:ファイルとして書き出す(ダウンロード)
 export function downloadText(name, text) {
   const url = URL.createObjectURL(new Blob([text], { type: 'application/json' }));
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = name;
+  document.body.append(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 10000);
+}
+
+// スマホ用:バイナリのファイル(Excelなど)として書き出す(ダウンロード)
+export function downloadBytes(name, bytes, type = 'application/octet-stream') {
+  const url = URL.createObjectURL(new Blob([bytes], { type }));
   const a = document.createElement('a');
   a.href = url;
   a.download = name;
