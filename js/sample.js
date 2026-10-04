@@ -55,4 +55,22 @@ function buildSample() {
   return { source: 'sample', fetchedAt: new Date().toISOString(), me: { id: 'u-me', name: people.me, email: 'me@example.com' }, chats };
 }
 
-export { buildSample };
+// デモ用のグループ設定(架空)。課の下に、条件で振り分けるグループを置いた例。
+function sampleGroups() {
+  const node = (id, parentId, name, order, rules = []) => ({ id, parentId, name, order, rules, include: [], exclude: [] });
+  return {
+    version: 1,
+    updatedAt: new Date().toISOString(),
+    nodes: [
+      node('g-demo-fac', null, '施設課', 0),
+      node('g-demo-fac-1', 'g-demo-fac', '課長と自分', 0, [{ type: 'exact', members: ['u-a'], types: [] }]),
+      node('g-demo-fac-2', 'g-demo-fac', '課長と補佐のみ', 1, [{ type: 'exact', members: ['u-a', 'u-b'], types: [] }]),
+      node('g-demo-fac-3', 'g-demo-fac', '工事Aの関係', 2, [{ type: 'all', members: ['u-a', 'u-b'], types: ['group'] }]),
+      node('g-demo-adm', null, '管理課', 1),
+      node('g-demo-adm-1', 'g-demo-adm', '用度1と自分', 0, [{ type: 'exact', members: ['u-e'], types: [] }]),
+      node('g-demo-adm-2', 'g-demo-adm', '省エネ会議', 1, [{ type: 'exact', members: ['u-e', 'u-f', 'u-g'], types: ['group'] }]),
+    ],
+  };
+}
+
+export { buildSample, sampleGroups };

@@ -85,3 +85,34 @@ button:disabled { opacity: .5; cursor: default; }
 .lens { display: flex; align-items: center; gap: 8px; color: var(--sub); font-size: 14px; }
 select { font: inherit; padding: 6px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--card); color: var(--text); }
 @media (max-width: 600px) { .top { padding: 10px 14px; } main { padding: 14px 14px 60px; } .row .date { margin-left: 0; } }
+
+/* ---- グループ ---- */
+.gbar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 12px; }
+.gnode { margin-bottom: 8px; }
+.ghead { display: flex; align-items: center; gap: 8px; background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 8px 12px; cursor: pointer; }
+.ghead:hover { border-color: var(--main); }
+.ghead.muted { color: var(--sub); }
+.caret { width: 1.2em; color: var(--sub); font-size: 12px; }
+.gname { font-weight: 700; }
+.gtools { margin-left: auto; display: flex; gap: 4px; }
+.mini { padding: 1px 9px; font-size: 13px; border-radius: 6px; }
+.gbody { margin: 6px 0 0 18px; padding-left: 10px; border-left: 2px solid var(--line); display: flex; flex-direction: column; gap: 6px; }
+.chatwrap { display: flex; flex-direction: column; }
+.inline { background: var(--card); border: 1px solid var(--main); border-top: none; border-radius: 0 0 10px 10px; padding: 4px 16px 14px; margin-top: -4px; }
+.inline input, .inline textarea, .inline select { width: 100%; font: inherit; padding: 6px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); color: var(--text); }
+.inline textarea { min-height: 70px; resize: vertical; }
+.gchips { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0; }
+.member .x { border: none; background: none; color: inherit; padding: 0 0 0 6px; cursor: pointer; font-size: 14px; }
+.gadd { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 6px; }
+.gadd select { flex: 1; min-width: 160px; width: auto; }
+.geditor { max-width: none; margin: 0 0 14px; border-color: var(--main); }
+.geditor h3 { margin: 0 0 4px; }
+.geditor input[type=text], .geditor input[type=search], .geditor select { width: 100%; }
+.rule { border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; margin: 8px 0; display: flex; flex-direction: column; gap: 6px; }
+.rulehead { display: flex; justify-content: space-between; align-items: center; }
+.rtypes { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; }
+.cb { display: inline-flex; align-items: center; gap: 4px; font-size: 14px; }
+.cb input { width: auto; }
+.presults { display: flex; flex-direction: column; gap: 4px; }
+.presult { text-align: left; }
+button.danger { color: var(--red); border-color: var(--red); }
