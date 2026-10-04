@@ -63,7 +63,7 @@ function buildSample() {
     chat('meeting', ['a', 'c', 'e'], { topic: '設備点検の打合せ', hidden: true, updatedAt: t(2, 10) }),
   ];
 
-  return { source: 'sample', fetchedAt: new Date().toISOString(), me: { id: 'u-me', name: people.me, email: 'me@example.com' }, chats };
+  return { source: 'sample', messagesEnabled: true, fetchedAt: new Date().toISOString(), me: { id: 'u-me', name: people.me, email: 'me@example.com' }, chats };
 }
 
 // デモ用のグループ設定(架空)。課の下に、条件で振り分けるグループを置いた例。

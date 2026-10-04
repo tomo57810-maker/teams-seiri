@@ -263,6 +263,7 @@ function chatRow(c, extra, onclick = () => select(c.id), opened = false, compact
 
 // 最近の投稿(チャットの内容)
 function messagesBlock(c) {
+  if (!st.raw || !st.raw.messagesEnabled) return []; // 投稿を取得していないデータでは、欄を出さない
   const meId = st.data.me && st.data.me.id;
   if (!c.messages.length) return [h('h4', {}, '最近の投稿'), h('div', { class: 'kv' }, '投稿はありません(または、まだ取得されていません)。')];
   const showN = st.msgMore.has(c.id) ? c.messages.length : Math.min(8, c.messages.length);

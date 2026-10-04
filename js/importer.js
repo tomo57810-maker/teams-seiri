@@ -40,5 +40,5 @@ export function parseImport(text) {
     };
   });
   const me = raw.me && typeof raw.me.id === 'string' ? { id: raw.me.id, name: str(raw.me.name, 200), email: str(raw.me.email, 200) } : null;
-  return { source: raw.source === 'sample' ? 'sample' : 'graph', fetchedAt: str(raw.fetchedAt, 40) || new Date().toISOString(), me, chats };
+  return { source: raw.source === 'sample' ? 'sample' : 'graph', messagesEnabled: raw.messagesEnabled === true, fetchedAt: str(raw.fetchedAt, 40) || new Date().toISOString(), me, chats };
 }
