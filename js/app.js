@@ -116,8 +116,19 @@ const persistReads = () => persistDoc('reads', 'reads.json', st.reads);
 
 // 投稿のExcelを読み込む(バイト列から)。戻り値:投稿の件数
 async function applyInboxBytes(bytes, name, modified) {
-  const inbox = IN.parseInbox(await readXlsx(bytes));
-  if (!inbox) throw new Error(`${name} に、投稿の表(見出し:投稿ID・日付・本文・リンク)が見つかりません。`);
+  // まず「データ」「ファイル」のシートだけを読む(軽い)。見つからなければ、全シートを読む
+  let sheets = await readXlsx(bytes, { sheetFilter: (n) => n === 'データ' || n === 'ファイル' });
+  let inbox = IN.parseInbox(sheets);
+  if (!inbox) {
+    sheets = await readXlsx(bytes);
+    inbox = IN.parseInbox(sheets);
+  }
+  if (!inbox) {
+    // 原因が分かるように、読めた内容の概要を、エラーに含める(投稿の内容は含めない)
+    const first = sheets[0] && (sheets[0].rows.find(Boolean) || []).slice(0, 6).map((v) => String(v ?? '').slice(0, 12)).join(' | ');
+    throw new Error(`${name} に、投稿の表(見出し:投稿ID・日付・本文・リンク)が見つかりません。
+(読めたシート:${sheets.length}枚 / 最初の3枚:${sheets.slice(0, 3).map((s) => s.name).join('、')} / 先頭行:${first || 'なし'} / サイズ:${bytes.length}バイト)`);
+  }
   st.inbox = { ...inbox, fileName: name, modified: modified || null, loadedAt: new Date().toISOString() };
   await dbSet('inbox', st.inbox);
   if (IN.applyBaseline(st.reads, st.inbox)) await persistReads(); // 初回は、全部を既読にしておく

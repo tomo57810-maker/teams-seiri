@@ -98,7 +98,8 @@ function parseSheet(xml, shared) {
   return rows;
 }
 
-export async function readXlsx(bytes) {
+// opts.sheetFilter(シート名) が false を返したシートは、読み飛ばす(大きなブックで、必要なシートだけを読むため)
+export async function readXlsx(bytes, opts = {}) {
   const zip = openZip(bytes);
   const text = async (name) => {
     const f = zip.get(name);
@@ -123,6 +124,7 @@ export async function readXlsx(bytes) {
   }
   const out = [];
   for (const s of sheets) {
+    if (opts.sheetFilter && !opts.sheetFilter(s.name)) continue;
     const xml = await text(s.path);
     if (xml) out.push({ name: s.name, rows: parseSheet(xml, shared) });
   }
