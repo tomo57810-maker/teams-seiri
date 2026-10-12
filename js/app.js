@@ -8,6 +8,8 @@ import * as sync from './sync.js';
 import { groupsTab, assignmentPanel } from './groups-ui.js';
 import * as P from './posts.js';
 import { postsTab } from './posts-ui.js';
+import * as IN from './inbox.js';
+import { readXlsx } from './xlsx-read.js';
 import { buildXlsx } from './xlsx.js';
 import { h, toast, fmtDate, typeLabel } from './util.js';
 
@@ -19,6 +21,10 @@ const st = {
   notes: {},
   groups: G.emptyDoc(),
   posts: P.emptyPosts(),
+  inbox: null, // Power Automateが集めた投稿(Teams投稿管理.xlsx から読み込んだもの)
+  reads: IN.emptyReads(), // 既読の記録(場所ごとの既読日時)
+  inboxHandle: null,
+  seenSince: new Map(), // 開いたチャットの、開く前の既読日時(「新」マークの表示用。保存しない)
   postForm: null,
   folder: { handle: null, granted: false },
   view: 'groups', // 'groups' | 'all' | 'lens:<整理の仕方のid>'
@@ -69,9 +75,14 @@ async function run(fn) {
 }
 
 // ---- データ ---------------------------------------------------------------
+// チャット一覧(raw)に、投稿(inbox)と既読(reads)を結びつけて、整理し直す
+function rebuild() {
+  st.data = st.raw ? analyze(st.inbox ? IN.mergeInbox(st.raw, st.inbox, st.reads) : st.raw) : null;
+}
+
 function setRaw(raw) {
   st.raw = raw;
-  st.data = raw ? analyze(raw) : null;
+  rebuild();
 }
 
 async function applyChats(raw) {
@@ -101,6 +112,64 @@ async function persistDoc(key, file, doc) {
 }
 const persistGroups = () => persistDoc('groups', sync.GROUPS_FILE, st.groups);
 const persistPosts = () => persistDoc('posts', sync.POSTS_FILE, st.posts);
+const persistReads = () => persistDoc('reads', 'reads.json', st.reads);
+
+// 投稿のExcelを読み込む(バイト列から)。戻り値:投稿の件数
+async function applyInboxBytes(bytes, name, modified) {
+  const inbox = IN.parseInbox(await readXlsx(bytes));
+  if (!inbox) throw new Error(`${name} に、投稿の表(見出し:投稿ID・日付・本文・リンク)が見つかりません。`);
+  st.inbox = { ...inbox, fileName: name, modified: modified || null, loadedAt: new Date().toISOString() };
+  await dbSet('inbox', st.inbox);
+  if (IN.applyBaseline(st.reads, st.inbox)) await persistReads(); // 初回は、全部を既読にしておく
+  rebuild();
+  return inbox.items.length;
+}
+
+// PCで選んだExcelファイルを読み直す(更新されていれば)。interactive=true のときだけ、許可を求める
+// 戻り値:false(許可なし) / 'same'(更新なし) / 件数
+async function loadInboxFromHandle(interactive) {
+  const handle = st.inboxHandle;
+  if (!handle) return false;
+  const ok = interactive ? await sync.requestReadPermission(handle) : await sync.hasReadPermission(handle);
+  if (!ok) return false;
+  const file = await handle.getFile();
+  if (st.inbox && st.inbox.modified === file.lastModified && st.inbox.fileName === file.name) return 'same';
+  return applyInboxBytes(new Uint8Array(await file.arrayBuffer()), file.name, file.lastModified);
+}
+
+const samePlaces = (a, b) => {
+  const ka = Object.keys(a);
+  return ka.length === Object.keys(b).length && ka.every((k) => a[k] === b[k]);
+};
+
+// 開いたら既読にする(ids:チャットのID)
+async function markChatsRead(ids) {
+  let changed = false;
+  for (const id of ids) {
+    const c = st.data && st.data.chats.find((x) => x.id === id);
+    if (c && IN.markRead(st.reads, id, IN.newestAt(c))) changed = true;
+  }
+  if (!changed) return;
+  await dbSet('reads', st.reads);
+  persistReads(); // フォルダへの保存は、待たない
+  rebuild();
+  renderHeader();
+  renderList();
+}
+
+const doChooseInbox = () =>
+  run(async () => {
+    let handle;
+    try {
+      handle = await sync.chooseInboxFile();
+    } catch (e) {
+      if (e && e.name === 'AbortError') return;
+      throw e;
+    }
+    st.inboxHandle = handle;
+    const n = await loadInboxFromHandle(true);
+    if (typeof n === 'number') toast(`投稿${n}件を読み込みました。`);
+  });
 
 async function saveGroups() {
   G.touch(st.groups);
@@ -162,6 +231,22 @@ async function loadFromFolder(interactive) {
   } else if (st.posts.items.length) {
     await persistPosts();
   }
+  const readsText = await sync.readText(f.handle, 'reads.json');
+  if (readsText) {
+    const remote = IN.sanitizeReads(JSON.parse(readsText));
+    const merged = IN.mergeReads(st.reads, remote);
+    const localChanged = !samePlaces(merged.places, st.reads.places);
+    const remoteChanged = !samePlaces(merged.places, remote.places);
+    st.reads = merged;
+    if (localChanged) {
+      await dbSet('reads', merged);
+      rebuild();
+      message ||= '既読の記録を読み込みました。';
+    }
+    if (remoteChanged) await persistReads();
+  } else if (Object.keys(st.reads.places).length) {
+    await persistReads();
+  }
   st.syncMsg = `フォルダと同期済み ${fmtDate(new Date().toISOString())}`;
   return message || true;
 }
@@ -190,7 +275,7 @@ const doSyncFolder = () =>
 
 // スマホ用:ファイルを選んで読み込む(chats.json・groups.json・posts.json を、同時に選んでもよい)
 function pickFiles() {
-  const input = h('input', { type: 'file', accept: '.json,application/json', multiple: 'multiple' });
+  const input = h('input', { type: 'file', accept: '.json,.xlsx,application/json,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', multiple: 'multiple' });
   input.addEventListener('change', () => {
     const files = [...(input.files || [])];
     if (!files.length) return;
@@ -198,6 +283,11 @@ function pickFiles() {
       const done = [];
       for (const file of files) {
         if (file.size > 50 * 1024 * 1024) throw new Error(`${file.name} は大きすぎます。`);
+        if (/\.xlsx$/i.test(file.name)) {
+          const n = await applyInboxBytes(new Uint8Array(await file.arrayBuffer()), file.name, file.lastModified);
+          done.push(`投稿${n}件`);
+          continue;
+        }
         const text = await file.text();
         let obj;
         try {
@@ -215,6 +305,11 @@ function pickFiles() {
           st.groups = doc;
           await dbSet('groups', doc);
           done.push(`グループ${doc.nodes.length}個`);
+        } else if (obj && obj.places && typeof obj.places === 'object' && !Array.isArray(obj.places)) {
+          st.reads = IN.mergeReads(st.reads, IN.sanitizeReads(obj)); // 既読は、新しい方を取る(戻らない)
+          await dbSet('reads', st.reads);
+          rebuild();
+          done.push('既読の記録');
         } else if (obj && Array.isArray(obj.items)) {
           const doc = P.parsePostsFile(text);
           if (st.posts.items.length && (st.posts.updatedAt || '') > (doc.updatedAt || '') && !confirm('この端末の投稿の記録の方が新しいようです。読み込んだ記録で置き換えますか?')) continue;
@@ -233,6 +328,7 @@ function pickFiles() {
 
 const exportGroups = () => sync.downloadText('groups.json', JSON.stringify(st.groups, null, 2));
 const exportPosts = () => sync.downloadText('posts.json', JSON.stringify(st.posts, null, 2));
+const exportReads = () => sync.downloadText('reads.json', JSON.stringify(st.reads, null, 2));
 
 // 投稿の記録を、最上位のグループごとのシートに整理して、Excelに書き出す
 const exportExcel = () => {
@@ -326,12 +422,14 @@ function messagesBlock(c) {
       'div',
       { class: 'msgs' },
       list.map((m) => {
-        const isNew = m.fromId !== meId && (!c.lastReadAt || m.at > c.lastReadAt);
+        const since = st.seenSince.has(c.id) ? st.seenSince.get(c.id) : c.lastReadAt; // 開いた直後も、新しかった投稿が分かるように
+        const isNew = m.fromId !== meId && (!since || m.at > since);
         return h(
           'div',
           { class: `msg${m.fromId === meId ? ' mine' : ''}${isNew ? ' new' : ''}` },
           h('div', { class: 'mhead' }, h('strong', {}, m.from || '(不明)'), h('span', { class: 'kv' }, fmtDate(m.at)), isNew ? h('span', { class: 'ubadge small' }, '新') : null),
           h('div', { class: 'mtext' }, m.text || '(本文なし)'),
+          m.link ? h('a', { class: 'mlink', href: m.link, target: '_blank', rel: 'noopener noreferrer' }, 'Teamsで開く') : null,
           m.attachments.length ? h('div', { class: 'mfiles' }, m.attachments.map((a) => h('a', { href: a.url, target: '_blank', rel: 'noopener noreferrer' }, `📎 ${a.name}`))) : null
         );
       })
@@ -390,7 +488,14 @@ function chatDetail(c, openOther = select) {
   ];
 }
 
-const app = { st, save: saveGroups, savePosts, exportExcel, savePrefs, rerenderList: () => renderList(), chatRow, chatDetail: (c) => chatDetail(c, (id) => ((st.openChat = id), renderList())), searchSet };
+const app = {
+  onOpen: (c) => {
+    if (!st.seenSince.has(c.id)) st.seenSince.set(c.id, c.lastReadAt || null);
+    markChatsRead([c.id]);
+  },
+  markRead: (ids) => markChatsRead(ids),
+  st,
+  save: saveGroups, savePosts, exportExcel, savePrefs, rerenderList: () => renderList(), chatRow, chatDetail: (c) => chatDetail(c, (id) => ((st.openChat = id), renderList())), searchSet };
 
 function renderList() {
   const box = document.getElementById('list');
@@ -470,9 +575,22 @@ function renderSettings(main) {
             h('div', { class: 'btns left' }, h('button', { class: 'primary', onclick: f.handle ? doSyncFolder : doConnectFolder }, f.handle ? 'フォルダから更新' : 'OneDriveのフォルダを選ぶ'), f.handle ? h('button', { onclick: doConnectFolder }, '別のフォルダを選ぶ') : null, f.handle ? h('button', { onclick: () => run(async () => (await sync.forgetFolder(), (st.folder = { handle: null, granted: false }), (st.syncMsg = ''))) }, '接続を解除') : null),
           ]
         : h('p', { class: 'kv' }, 'この端末のブラウザは、フォルダとの直接連携に対応していません。ファイルを選んで読み込みます。'),
+      h('h4', {}, '投稿のExcel(Teams投稿管理.xlsx)'),
+      h(
+        'p',
+        { class: 'kv' },
+        st.inbox ? `読み込み済み:${st.inbox.fileName}(投稿${st.inbox.items.length}件、ファイル${st.inbox.files.length}件。${fmtDate(st.inbox.loadedAt)} に読み込み)` : 'まだ読み込んでいません。Power Automateが集めた投稿を、チャットのグループの中で読めるようになります。'
+      ),
+      h(
+        'div',
+        { class: 'btns left' },
+        sync.folderSupported ? h('button', { class: 'primary', onclick: doChooseInbox }, st.inboxHandle ? '別のExcelを選ぶ' : 'Teams投稿管理.xlsx を選ぶ(PC)') : null,
+        st.inbox ? h('button', { class: 'danger', onclick: () => run(async () => ((st.inbox = null), (st.inboxHandle = null), await dbDelete('inbox'), await sync.forgetInboxFile(), rebuild())) }, '投稿の読み込みを消す') : null
+      ),
+      sync.folderSupported && st.inboxHandle ? h('p', { class: 'kv' }, 'PCでは、選んだExcelを、1分ごとに確認して、更新されていれば自動で読み込みます。') : null,
       h('h4', {}, 'ファイルで受け渡す(スマホ・フォルダ連携なしの場合)'),
       h('p', { class: 'kv' }, 'chats.json と groups.json は、同時に選べます。スマホで編集したグループ設定をPCへ戻すには、「グループ設定を書き出す」で groups.json を保存し、OneDriveの「Teams整理」フォルダにアップロードしてください(同名のファイルを上書き)。'),
-      h('div', { class: 'btns left' }, h('button', { class: 'primary', onclick: pickFiles }, 'ファイルを読み込む'), h('button', { onclick: exportGroups }, 'グループ設定を書き出す'), h('button', { onclick: exportPosts }, '投稿の記録を書き出す')),
+      h('div', { class: 'btns left' }, h('button', { class: 'primary', onclick: pickFiles }, 'ファイルを読み込む'), h('button', { onclick: exportGroups }, 'グループ設定を書き出す'), h('button', { onclick: exportPosts }, '投稿の記録を書き出す'), h('button', { onclick: exportReads }, '既読の記録を書き出す')),
       h('h4', {}, '消す'),
       h('div', { class: 'btns left' }, h('button', { onclick: () => (doClear(), (st.page = 'main')) }, '読み込んだチャットを消す'), h('button', { class: 'danger', onclick: () => confirm('グループ設定をすべて削除しますか?(フォルダ接続中は、フォルダのファイルも次回の保存で置き換わります)') && run(async () => ((st.groups = G.touch(G.emptyDoc())), await persistGroups())) }, 'グループ設定を消す'), h('button', { class: 'danger', onclick: () => confirm('投稿の記録をすべて削除しますか?(フォルダ接続中は、フォルダのファイルも次回の保存で置き換わります)') && run(async () => ((st.posts = P.touchPosts(P.emptyPosts())), await persistPosts())) }, '投稿の記録を消す')),
       h('div', { class: 'btns left' }, h('button', { onclick: () => ((st.page = 'main'), render()) }, '戻る'))
@@ -556,13 +674,23 @@ function render() {
 
 // ---- 起動 -----------------------------------------------------------------
 async function autoRefresh() {
-  if (st.busy || !st.folder.handle || st.editing) return;
+  if (st.busy || st.editing || st.postForm || (!st.folder.handle && !st.inboxHandle)) return;
   try {
-    const r = await loadFromFolder(false);
-    if (typeof r === 'string') {
-      toast(r);
-      render();
-    } else if (r === true) renderHeader();
+    let message = null;
+    if (st.folder.handle) {
+      const r = await loadFromFolder(false);
+      if (typeof r === 'string') message = r;
+    }
+    if (st.inboxHandle) {
+      const n = await loadInboxFromHandle(false);
+      if (typeof n === 'number') message = message || `新しい投稿を読み込みました(${n}件)。`;
+    }
+    renderHeader();
+    if (message) {
+      toast(message);
+      renderList();
+      renderDetail();
+    }
   } catch {
     /* 自動更新の失敗は、画面に出さない(手動の「フォルダから更新」で原因が表示される) */
   }
@@ -571,6 +699,11 @@ async function autoRefresh() {
 (async function init() {
   if ('serviceWorker' in navigator && location.protocol !== 'file:') navigator.serviceWorker.register('./sw.js').catch(() => {});
   try {
+    const savedInbox = await dbGet('inbox', null);
+    if (savedInbox && Array.isArray(savedInbox.items)) st.inbox = savedInbox;
+    const savedReads = await dbGet('reads', null);
+    if (savedReads) st.reads = IN.sanitizeReads(savedReads);
+    if (sync.folderSupported) st.inboxHandle = await sync.savedInboxFile();
     setRaw(await dbGet('chats', null));
     st.notes = await dbGet('notes', {});
     const saved = await dbGet('groups', null);

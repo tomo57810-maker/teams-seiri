@@ -3,7 +3,8 @@
 //
 // 記録(item)の形:
 //   { id, at(ISO日時), from(投稿者), text(内容), status(状態), note(備考), link(Teamsの投稿へのリンク),
-//     chatId(リンクから読み取ったチャットID。なければ null), groupId(手動で選んだグループ。なければ null),
+//     chatId(リンクから読み取ったチャットID。なければ null), team・channel(チャンネルの投稿のとき、リンクから読み取ったチーム名・チャンネル名),
+//     groupId(手動で選んだグループ。なければ null),
 //     files: [{ name, url }] }
 // 保存用の形: { version: 1, updatedAt, items: [item] }
 import * as G from './groups.js';
@@ -36,6 +37,8 @@ export function sanitizePosts(raw) {
       note: str(p.note, 2000),
       link: httpsUrl(p.link),
       chatId: typeof p.chatId === 'string' ? p.chatId.slice(0, 300) : null,
+      team: str(p.team, 100),
+      channel: str(p.channel, 100),
       groupId: typeof p.groupId === 'string' ? p.groupId.slice(0, 80) : null,
       files: (Array.isArray(p.files) ? p.files : []).slice(0, 20).map((f) => ({ name: str(f && f.name, 200) || '(名前なし)', url: httpsUrl(f && f.url) })).filter((f) => f.url),
     };
@@ -55,7 +58,8 @@ export function parsePostsFile(text) {
 
 // ---- Teamsのリンクを読む -----------------------------------------------------
 // 「メッセージのリンクをコピー」で得られる https://teams.microsoft.com/l/message/<チャットID>/<投稿時刻(ミリ秒)>?... の形
-// 戻り値: null(Teamsのリンクではない) / { url, chatId, ts }(chatId・ts は読み取れなければ null)
+// 戻り値: null(Teamsのリンクではない) / { url, chatId, ts, team, channel }(読み取れなかった項目は null や空文字)
+// チャンネルの投稿のリンクには、teamName・channelName が入っている(チャットの投稿のリンクでは空)
 export function parseTeamsLink(raw) {
   let u;
   try {
@@ -66,7 +70,9 @@ export function parseTeamsLink(raw) {
   const host = u.hostname;
   if (u.protocol !== 'https:' || !(host === 'teams.microsoft.com' || host === 'teams.cloud.microsoft' || host.endsWith('.teams.microsoft.com'))) return null;
   const m = u.pathname.match(/^\/l\/message\/([^/]+)\/(\d{10,16})/);
-  if (!m) return { url: u.href, chatId: null, ts: null };
+  const team = (u.searchParams.get('teamName') || '').slice(0, 100);
+  const channel = (u.searchParams.get('channelName') || '').slice(0, 100);
+  if (!m) return { url: u.href, chatId: null, ts: null, team, channel };
   let chatId = null;
   try {
     chatId = decodeURIComponent(m[1]);
@@ -76,7 +82,7 @@ export function parseTeamsLink(raw) {
   let ts = Number(m[2]);
   if (ts < 1e11) ts *= 1000; // 秒で書かれている場合
   if (ts < Date.UTC(2015, 0, 1) || ts > Date.UTC(2100, 0, 1)) ts = null;
-  return { url: u.href, chatId, ts };
+  return { url: u.href, chatId, ts, team, channel };
 }
 
 // ---- 貼り付けた文章を読む -----------------------------------------------------
@@ -129,7 +135,7 @@ export function parsePasted(text, year = new Date().getFullYear()) {
 }
 
 // ---- グループへの仕分け -------------------------------------------------------
-// 記録が入るグループを決める:手動で選んだグループ > リンクのチャットが入っているグループ(一番深いもの)> 未分類
+// 記録が入るグループを決める:手動で選んだグループ > リンクのチャットが入っているグループ(一番深いもの)> チャンネルの「チーム名 › チャンネル名」> 未分類
 export function groupOf(post, data, doc) {
   const byId = new Map(doc.nodes.map((n) => [n.id, n]));
   const pick = (id) => ({ nodeId: id, path: G.pathLabel(doc, id), top: G.pathLabel(doc, id).split(' › ')[0] });
@@ -143,6 +149,7 @@ export function groupOf(post, data, doc) {
       return pick(ids[0]);
     }
   }
+  if (post.team) return { nodeId: null, path: post.channel ? `${post.team} › ${post.channel}` : post.team, top: post.team }; // チャンネルの投稿は、チーム名でまとめる
   return { nodeId: null, path: '未分類', top: '未分類' };
 }
 
@@ -163,13 +170,15 @@ export function organize(posts, data, doc) {
     if (!sheets.has(g.top)) sheets.set(g.top, []);
     sheets.get(g.top).push({ post: p, path: g.path, rank: g.nodeId ? order.get(g.nodeId) : Infinity });
   }
-  const names = [...sheets.keys()].filter((n) => n !== '未分類');
   const rankOf = (name) => Math.min(...sheets.get(name).map((x) => x.rank));
-  names.sort((a, b) => rankOf(a) - rankOf(b));
+  const others = [...sheets.keys()].filter((n) => n !== '未分類');
+  const inGroups = others.filter((n) => rankOf(n) !== Infinity).sort((a, b) => rankOf(a) - rankOf(b));
+  const byTeam = others.filter((n) => rankOf(n) === Infinity).sort((a, b) => a.localeCompare(b, 'ja'));
+  const names = [...inGroups, ...byTeam];
   if (sheets.has('未分類')) names.push('未分類');
   return names.map((name) => ({
     name,
-    items: sheets.get(name).sort((a, b) => a.rank - b.rank || (a.post.at || '').localeCompare(b.post.at || '')),
+    items: sheets.get(name).sort((a, b) => (a.rank === b.rank ? 0 : a.rank - b.rank) || a.path.localeCompare(b.path, 'ja') || (a.post.at || '').localeCompare(b.post.at || '')),
   }));
 }
 

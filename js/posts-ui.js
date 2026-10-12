@@ -77,8 +77,8 @@ function postCard({ post: p, path }, app) {
 function openForm(app, post) {
   const { st } = app;
   st.postForm = post
-    ? { id: post.id, link: post.link || '', paste: '', at: post.at, atFromLink: false, from: post.from, text: post.text, status: post.status, note: post.note, files: post.files.map((f) => ({ ...f })), groupId: post.groupId || '', chatId: post.chatId }
-    : { id: null, link: '', paste: '', at: null, atFromLink: false, from: '', text: '', status: '', note: '', files: [], groupId: '', chatId: null };
+    ? { id: post.id, link: post.link || '', paste: '', at: post.at, atFromLink: false, from: post.from, text: post.text, status: post.status, note: post.note, files: post.files.map((f) => ({ ...f })), groupId: post.groupId || '', chatId: post.chatId, team: post.team || '', channel: post.channel || '' }
+    : { id: null, link: '', paste: '', at: null, atFromLink: false, from: '', text: '', status: '', note: '', files: [], groupId: '', chatId: null, team: '', channel: '' };
   app.rerenderList();
   const el = document.getElementById('pform');
   if (el) el.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
@@ -105,11 +105,12 @@ function formPanel(app) {
   group.value = d.groupId;
 
   const updateInfo = () => {
-    const g = P.groupOf({ chatId: d.chatId, groupId: d.groupId || null }, st.data, st.groups);
+    const g = P.groupOf({ chatId: d.chatId, groupId: d.groupId || null, team: d.team, channel: d.channel }, st.data, st.groups);
     const chat = d.chatId && st.data.chats.find((c) => c.id === d.chatId);
     let msg;
     if (d.groupId) msg = `入るグループ:${g.path}(手動で選択)`;
     else if (chat) msg = `チャット「${chat.displayName}」→ 入るグループ:${g.path}`;
+    else if (d.team) msg = `チャンネル「${d.team}${d.channel ? ` › ${d.channel}` : ''}」の投稿 → 入るグループ:${g.path}(別のグループに入れたい場合は、下で選んでください)`;
     else if (d.link) msg = d.chatId ? 'このチャットは、取得済みの一覧にありません(取得ツールで最新にするか、下でグループを選んでください)。入るグループ:未分類' : 'リンクからチャットを特定できません(チャンネルの投稿など)。下でグループを選べます。入るグループ:未分類';
     else msg = '入るグループ:未分類(リンクを貼るか、下でグループを選んでください)';
     info.textContent = msg;
@@ -119,6 +120,8 @@ function formPanel(app) {
     d.link = link.value.trim();
     const t = P.parseTeamsLink(d.link);
     d.chatId = t ? t.chatId : null;
+    d.team = t ? t.team : '';
+    d.channel = t ? t.channel : '';
     if (t && t.ts) {
       d.at = new Date(t.ts).toISOString(); // 投稿時刻は、リンクの中の値が一番正確
       d.atFromLink = true;
@@ -168,7 +171,7 @@ function formPanel(app) {
     const files = d.files.filter((f) => f.url.trim() || f.name.trim()).map((f) => ({ name: f.name.trim(), url: f.url.trim() }));
     if (files.some((f) => !/^https:\/\//.test(f.url))) return toast('添付ファイルのリンクは、https:// で始まるものを入力してください。', true);
     if (!d.text.trim() && !lk) return toast('内容かリンクを入力してください。', true);
-    const item = P.sanitizePosts({ items: [{ id: d.id || P.newPostId(), at: d.at, from: d.from.trim(), text: d.text.trim(), status: d.status.trim(), note: d.note.trim(), link: lk || null, chatId: d.chatId, groupId: d.groupId || null, files }] }).items[0];
+    const item = P.sanitizePosts({ items: [{ id: d.id || P.newPostId(), at: d.at, from: d.from.trim(), text: d.text.trim(), status: d.status.trim(), note: d.note.trim(), link: lk || null, chatId: d.chatId, team: d.team, channel: d.channel, groupId: d.groupId || null, files }] }).items[0];
     const i = st.posts.items.findIndex((x) => x.id === item.id);
     if (i >= 0) st.posts.items[i] = item;
     else st.posts.items.push(item);

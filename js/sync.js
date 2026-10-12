@@ -77,3 +77,36 @@ export function downloadBytes(name, bytes, type = 'application/octet-stream') {
   a.remove();
   setTimeout(() => URL.revokeObjectURL(url), 10000);
 }
+
+// ---- 投稿のExcel(Teams投稿管理.xlsx)を、PCで選んで、あとから読み直す ----------------
+const INBOX_KEY = 'inboxHandle';
+
+// ファイルを選んでもらう(ボタンを押した直後に呼ぶ必要がある)
+export async function chooseInboxFile() {
+  const [handle] = await window.showOpenFilePicker({
+    id: 'teams-seiri-inbox',
+    multiple: false,
+    types: [{ description: 'Excelファイル', accept: { 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': ['.xlsx'] } }],
+  });
+  await dbSet(INBOX_KEY, handle);
+  return handle;
+}
+
+export const savedInboxFile = () => dbGet(INBOX_KEY, null).catch(() => null);
+export const forgetInboxFile = () => dbDelete(INBOX_KEY);
+
+export async function hasReadPermission(handle) {
+  try {
+    return (await handle.queryPermission({ mode: 'read' })) === 'granted';
+  } catch {
+    return false;
+  }
+}
+
+export async function requestReadPermission(handle) {
+  try {
+    return (await handle.requestPermission({ mode: 'read' })) === 'granted';
+  } catch {
+    return false;
+  }
+}

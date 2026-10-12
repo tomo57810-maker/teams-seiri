@@ -124,6 +124,7 @@ function chatWrap(c, app) {
     { class: 'chatwrap' },
     app.chatRow(c, null, () => {
       st.openChat = opened ? null : c.id;
+      if (!opened && app.onOpen) app.onOpen(c); // 開いたら既読にする
       app.rerenderList();
     }, opened, true),
     opened ? h('div', { class: 'inline' }, app.chatDetail(c)) : null
@@ -174,6 +175,9 @@ function nodeEl(v, app, byId, searchSet) {
       ? h(
           'div',
           { class: 'gbody' },
+          unreadChatsIn(v.subtree, byId) && app.markRead
+            ? h('div', { class: 'readall' }, h('button', { class: 'mini', onclick: () => app.markRead([...v.subtree]) }, `このグループの未読${unreadChatsIn(v.subtree, byId)}件を、すべて既読にする`))
+            : null,
           filesSection(v, app, byId),
           children,
           own.map((id) => chatWrap(byId.get(id), app)),

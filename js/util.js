@@ -1,5 +1,5 @@
 // 画面で共通に使う小さな部品。
-const TYPE_LABEL = { group: 'グループ', oneOnOne: '1対1', meeting: '会議' };
+const TYPE_LABEL = { group: 'グループ', oneOnOne: '1対1', meeting: '会議', channel: 'チャンネル' };
 export const typeLabel = (t) => TYPE_LABEL[t] || 'その他';
 
 // DOMを作る。文字は必ず textNode にする(チャット名などに含まれる記号が、HTMLとして解釈されないようにする)
