@@ -661,8 +661,10 @@ function renderHeader() {
     else if (sync.folderSupported) actions.append(h('button', { class: 'primary', onclick: doConnectFolder, disabled: st.busy }, 'OneDriveのフォルダを選ぶ'));
     else actions.append(h('button', { class: 'primary', onclick: pickFiles, disabled: st.busy }, st.busy ? '読み込み中…' : '最新のファイルを読み込む'));
   }
+  // 投稿のExcelだけを読み込んだ状態(チャット一覧がまだ)でも、チャット一覧を読み込めるようにする
+  if (!st.raw && st.inbox) actions.append(h('button', { class: 'primary', onclick: pickFiles, disabled: st.busy }, st.busy ? '読み込み中…' : 'chats.json を読み込む'));
   if (st.raw && st.raw.source === 'sample') actions.append(h('button', { onclick: doClear }, 'デモを消す'));
-  if (st.raw) actions.append(h('button', { onclick: () => ((st.page = st.page === 'settings' ? 'main' : 'settings'), render()) }, 'データ管理'));
+  if (st.raw || st.inbox) actions.append(h('button', { onclick: () => ((st.page = st.page === 'settings' ? 'main' : 'settings'), render()) }, 'データ管理'));
 }
 
 function render() {
