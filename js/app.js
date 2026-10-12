@@ -77,7 +77,9 @@ async function run(fn) {
 // ---- データ ---------------------------------------------------------------
 // チャット一覧(raw)に、投稿(inbox)と既読(reads)を結びつけて、整理し直す
 function rebuild() {
-  st.data = st.raw ? analyze(st.inbox ? IN.mergeInbox(st.raw, st.inbox, st.reads) : st.raw) : null;
+  // チャット一覧(chats.json)がなくても、投稿のExcelだけで画面を出す(メンバーでの仕分けは、チャット一覧が必要)
+  const base = st.raw || (st.inbox ? { source: 'graph', fetchedAt: st.inbox.loadedAt, me: null, chats: [] } : null);
+  st.data = base ? analyze(st.inbox ? IN.mergeInbox(base, st.inbox, st.reads) : base) : null;
 }
 
 function setRaw(raw) {
@@ -422,7 +424,7 @@ function chatRow(c, extra, onclick = () => select(c.id), opened = false, compact
 
 // 最近の投稿(チャットの内容)
 function messagesBlock(c) {
-  if (!st.raw || !st.raw.messagesEnabled) return []; // 投稿を取得していないデータでは、欄を出さない
+  if (!st.data || !st.data.messagesEnabled) return []; // 投稿を取得していないデータでは、欄を出さない
   const meId = st.data.me && st.data.me.id;
   if (!c.messages.length) return [h('h4', {}, '最近の投稿'), h('div', { class: 'kv' }, '投稿はありません(または、まだ取得されていません)。')];
   const showN = st.msgMore.has(c.id) ? c.messages.length : Math.min(8, c.messages.length);
@@ -649,6 +651,7 @@ function renderHeader() {
   const actions = document.getElementById('actions');
   const parts = [];
   if (st.raw) parts.push(`${st.raw.source === 'sample' ? '【デモデータ】' : ''}取得: ${fmtDate(st.raw.fetchedAt)}`);
+  else if (st.inbox) parts.push('投稿のみ(チャット一覧は未読み込み)');
   if (st.data && st.data.counts.unreadChats) parts.push(`未読のあるチャット ${st.data.counts.unreadChats}件`);
   if (st.syncMsg) parts.push(st.syncMsg);
   status.textContent = parts.join(' / ');
@@ -677,6 +680,7 @@ function render() {
     return;
   }
   renderTools(main);
+  if (!st.raw && st.inbox) main.append(h('p', { class: 'kv' }, '投稿のExcelだけを読み込んでいます。チャット一覧(chats.json)も読み込むと、メンバーでのグループの自動振り分けと、自分の投稿の判定ができます。'));
   main.append(h('div', { class: 'list', id: 'list' }));
   if (st.view !== 'groups' && st.view !== 'all') main.append(h('p', { class: 'note' }, '「似たチャット」は、グループチャットのうち、メンバーの違いが2人以内で、自分以外の共通メンバーが2人以上いるものです。1対1と会議は対象外です。'));
   renderList();

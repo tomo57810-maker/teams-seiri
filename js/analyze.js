@@ -160,7 +160,7 @@ function analyze(data) {
     identicalSets,
   };
 
-  return { me: data.me || null, fetchedAt: data.fetchedAt || null, source: data.source || null, chats, clusters, counts };
+  return { messagesEnabled: data.messagesEnabled === true, me: data.me || null, fetchedAt: data.fetchedAt || null, source: data.source || null, chats, clusters, counts };
 }
 
 export { analyze, SIMILAR_MAX_DIFF, SIMILAR_MIN_OTHERS };
